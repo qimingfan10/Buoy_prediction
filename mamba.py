@@ -10,12 +10,15 @@ from torch.optim.lr_scheduler import ReduceLROnPlateau
 from mamba_ssm.modules.mamba_simple import Mamba
 from dataclasses import dataclass
 from tqdm import tqdm
+import time
+
+start_time = time.time()
 #help(Mamba)
 class BuoyDataset(Dataset):
-    def __init__(self, folder_0, folder_1, max_depth=100):
+    def __init__(self, folder_0, folder_1, max_depth=100, n=None):
         self.samples = []
         self.lengths = []  # 存储序列长度
-        
+        self.n = n  # 新增参数n
         # 检查文件夹是否存在
         if not Path(folder_0).exists():
             raise FileNotFoundError(f"文件夹不存在: {folder_0}")
@@ -31,7 +34,10 @@ class BuoyDataset(Dataset):
         for csv_file in tqdm(files_0):
             df = pd.read_csv(csv_file)
             length = len(df)
-            if length > max_depth:
+            if self.n is not None and self.n < length:
+                df = df.iloc[:self.n]  # 只选择前n条数据
+                length = self.n
+            elif length > max_depth:
                 df = df.iloc[:max_depth]
                 length = max_depth
             self.lengths.append(length)
@@ -46,7 +52,10 @@ class BuoyDataset(Dataset):
         for csv_file in tqdm(files_1):
             df = pd.read_csv(csv_file)
             length = len(df)
-            if length > max_depth:
+            if self.n is not None and self.n < length:
+                df = df.iloc[:self.n]  # 只选择前n条数据
+                length = self.n
+            elif length > max_depth:
                 df = df.iloc[:max_depth]
                 length = max_depth
             self.lengths.append(length)
@@ -158,6 +167,7 @@ def train_model(model, train_loader, val_loader, device, epochs=50):
         # 训练阶段
         model.train()
         train_loss = 0
+        correct = 0  # 记录正确预测的数量
         train_pbar = tqdm(train_loader, desc=f'Epoch {epoch+1}/{epochs} [Train]')
         
         for inputs, labels, lengths in train_pbar:
@@ -173,9 +183,12 @@ def train_model(model, train_loader, val_loader, device, epochs=50):
             optimizer.step()
             
             train_loss += loss.item()
+            preds = (torch.sigmoid(outputs) > 0.5).long()
+            correct += (preds == labels).sum().item()  # 计算正确预测的数量
             train_pbar.set_postfix({'loss': f'{loss.item():.4f}'})
             
         train_loss /= len(train_loader)
+        train_acc = correct / len(train_loader.dataset)  # 计算训练准确率
         
         # 验证阶段
         model.eval()
@@ -193,29 +206,28 @@ def train_model(model, train_loader, val_loader, device, epochs=50):
                 val_loss += loss.item()
                 
                 preds = (torch.sigmoid(outputs) > 0.5).long()
-                correct += (preds == labels).sum().item()
+                correct += (preds == labels).sum().item()  # 计算正确预测的数量
                 
                 val_pbar.set_postfix({'loss': f'{loss.item():.4f}'})
             
         val_loss /= len(val_loader)
-        val_acc = correct / len(val_loader.dataset)
+        val_acc = correct / len(val_loader.dataset)  # 计算验证准确率
         
         # 更新学习率
         scheduler.step(val_acc)
         
         print(f"\nEpoch {epoch+1}/{epochs} Summary:")
-        print(f"Train Loss: {train_loss:.4f}, Val Loss: {val_loss:.4f}")
-        print(f"Val Acc: {val_acc:.4f}")
+        print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}, Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.4f}")
         
         # 早停
         if val_acc > best_acc:
             best_acc = val_acc
             no_improve = 0
-            torch.save(model.state_dict(), 'best_mamba_model.pth')
+            torch.save(model.state_dict(), 'new_mamba_model.pth')
         else:
             no_improve += 1
             if no_improve >= patience:
-                print("Early stopping triggered")
+                print("Early stopping triggered based on validation accuracy")
                 break
 
 def evaluate(model, test_loader, device):
@@ -243,7 +255,12 @@ def evaluate(model, test_loader, device):
     test_loss /= len(test_loader)
     print(f"\nTest Loss: {test_loss:.4f}")
     print("\nClassification Report:")
-    print(classification_report(y_true, y_pred))
+    report = classification_report(y_true, y_pred, output_dict=True)
+    for label, metrics in report.items():
+        if isinstance(metrics, dict):  # 只处理字典类型的指标
+            print(f"{label}: Precision: {metrics['precision']:.4f}, Recall: {metrics['recall']:.4f}, F1-score: {metrics['f1-score']:.4f}, Support: {metrics['support']}")
+        else:
+            print(f"{label}: {metrics:.4f}")
 
 # 使用示例
 if __name__ == "__main__":
@@ -251,8 +268,10 @@ if __name__ == "__main__":
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
     
     # 创建数据加载器
-    train_dataset = BuoyDataset('data/train/folder_0', 'data/train/folder_1')
-    val_dataset = BuoyDataset('data/val/folder_0', 'data/val/folder_1')
+    train_n = 3000  # 训练数据集使用的n值
+    val_n = 600    # 验证数据集使用的n值
+    train_dataset = BuoyDataset('newdata/train/folder_0', 'newdata/train/folder_1', n=train_n)
+    val_dataset = BuoyDataset('newdata/val/folder_0', 'newdata/val/folder_1', n=val_n)
     
     train_loader = DataLoader(
         train_dataset, 
@@ -273,3 +292,14 @@ if __name__ == "__main__":
     
     # 训练模型
     train_model(model, train_loader, val_loader, device)
+    
+    # 加载最佳模型权重
+    model.load_state_dict(torch.load('new_mamba_model.pth'))
+    
+    # 评估最佳模型在验证集上的性能
+    print("\n评估最佳模型在验证集上的性能:")
+    evaluate(model, val_loader, device)
+end_time = time.time()    # 记录结束时间
+run_time = end_time - start_time  # 计算运行时间
+
+print(f"代码运行时间：{run_time} 秒")

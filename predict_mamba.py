@@ -6,7 +6,9 @@ from mamba import TemporalModel
 from torch.utils.data import Dataset, DataLoader
 from sklearn.preprocessing import StandardScaler
 from tqdm import tqdm
+import time
 
+start_time = time.time()
 class PredictionDataset(Dataset):
     def __init__(self, file_paths, scaler_path=None, max_depth=100):
         self.samples = []
@@ -119,7 +121,7 @@ def main():
     # 加载模型
     print("加载模型...")
     model = TemporalModel().to(device)
-    model.load_state_dict(torch.load('best_mamba_model.pth'))
+    model.load_state_dict(torch.load('1200new_mamba_model.pth'))
     
     # 进行预测
     predictions, probabilities, file_names = predict_files(model, data_loader, device)
@@ -163,4 +165,8 @@ def main():
     # print(f"中位数概率: {np.median(probabilities_array):.4f}")
 
 if __name__ == "__main__":
-    main() 
+    main()
+    end_time = time.time()    # 记录结束时间
+    run_time = end_time - start_time  # 计算运行时间
+
+    print(f"代码运行时间：{run_time} 秒")
