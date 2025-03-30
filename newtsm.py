@@ -118,34 +118,90 @@ def load_data_from_folder(folder_path, n=1500):
     return pd.concat(all_data, ignore_index=True)
 
 def load_data_from_csv(folder_path, sequence_length):
-    """数据加载函数 (保持不变，除了模型部分)"""
+    """数据加载函数"""
     all_profile_data = load_data_from_folder(folder_path)
     sequences = []
     labels = []
     profile_filenames = sorted(list(set(all_profile_data['filename'])), key=natural_sort_key)
-    for i in range(len(profile_filenames) - sequence_length + 1):
-        sequence_filenames = profile_filenames[i:i + sequence_length]
-        sequence_features = []
-        current_labels = []
-        for filename in sequence_filenames:
-            profile_df = all_profile_data[all_profile_data['filename'] == filename].copy()
-            feature_vector = extract_profile_features(profile_df)
-            if feature_vector is not None:
-                sequence_features.append(feature_vector)
-                current_label = get_profile_label_from_filename(filename)
-                current_labels.append(current_label)
-            else:
-                print(f"警告: 文件 {filename} 提取特征失败，跳过序列.")
-                sequence_features = []
-                break
-        if len(sequence_features) == sequence_length and len(current_labels) == sequence_length:
-            if len(set(current_labels)) == 1:
-                sequences.append(sequence_features)
-                labels.append(current_labels[0])
-            else:
-                print(f"警告: 序列从 {sequence_filenames[0]} 开始的文件标签不一致，跳过序列.")
+    
+    # 计算需要多少组，每组至少包含 sequence_length 个连续剖面
+    group_size = sequence_length
+    num_groups = len(profile_filenames) // group_size
+    
+    for group_idx in range(num_groups):
+        start_idx = group_idx * group_size
+        end_idx = start_idx + group_size
+        group_filenames = profile_filenames[start_idx:end_idx]
+        
+        # 处理这一组内的序列
+        if len(group_filenames) >= sequence_length:
+            sequence_features = []
+            current_labels = []
+            for filename in group_filenames:
+                profile_df = all_profile_data[all_profile_data['filename'] == filename].copy()
+                feature_vector = extract_profile_features(profile_df)
+                if feature_vector is not None:
+                    sequence_features.append(feature_vector)
+                    current_label = get_profile_label_from_filename(filename)
+                    current_labels.append(current_label)
+                else:
+                    sequence_features = []
+                    break
+            
+            if len(sequence_features) == sequence_length and len(current_labels) == sequence_length:
+                if len(set(current_labels)) == 1:
+                    sequences.append(sequence_features)
+                    labels.append(current_labels[0])
+                
     return np.array(sequences), np.array(labels)
 
+def split_data(sequences, labels, train_size=0.6, val_size=0.2, test_size=0.2, random_state=42):
+    """三向划分：训练集60%，验证集20%，测试集20%"""
+    # 首先划分出测试集
+    train_val_sequences, test_sequences, train_val_labels, test_labels = train_test_split(
+        sequences, 
+        labels, 
+        test_size=test_size, 
+        random_state=random_state,
+        stratify=labels
+    )
+    
+    # 然后将剩下的数据划分为训练集和验证集
+    # 验证集比例需要重新计算：0.2 / (1 - 0.2) = 0.25
+    train_sequences, val_sequences, train_labels, val_labels = train_test_split(
+        train_val_sequences,
+        train_val_labels,
+        test_size=val_size/(train_size + val_size),
+        random_state=random_state,
+        stratify=train_val_labels
+    )
+    
+    return train_sequences, val_sequences, test_sequences, train_labels, val_labels, test_labels
+
+# 首先定义路径和序列长度
+folder_path = '/root/0'
+sequence_length = 4
+
+# 然后加载数据
+sequences, labels = load_data_from_csv(folder_path, sequence_length)
+
+# 进行数据集划分
+train_sequences, val_sequences, test_sequences, train_labels, val_labels, test_labels = split_data(
+    sequences, labels, train_size=0.6, val_size=0.2, test_size=0.2, random_state=42
+)
+
+# 检查数据加载
+if sequences.size == 0 or labels.size == 0:
+    print("错误: 未能成功加载任何数据，请检查数据文件和路径.")
+    exit()
+
+print(f"加载数据完成，序列数量: {len(sequences)}, 标签数量: {len(labels)}")
+print(f"序列数据形状: {sequences.shape}, 标签数据形状: {labels.shape}")
+
+# 打印各个数据集的形状
+print(f"训练集序列形状: {train_sequences.shape}, 训练集标签形状: {train_labels.shape}")
+print(f"验证集序列形状: {val_sequences.shape}, 验证集标签形状: {val_labels.shape}")
+print(f"测试集序列形状: {test_sequences.shape}, 测试集标签形状: {test_labels.shape}")
 
 # 数据集类 (PyTorch 版本)
 class ProfileDataset(Dataset):
@@ -159,38 +215,15 @@ class ProfileDataset(Dataset):
     def __getitem__(self, idx):
         return self.sequences[idx], self.labels[idx]
 
-
-# 示例用法 (保持不变)
-folder_path = '/root/处理后数据/标签0_处理后的文件_修改后'
-sequence_length = 4
-
-# 加载数据
-sequences, labels = load_data_from_csv(folder_path, sequence_length)
-
-# 检查数据加载 (保持不变)
-if sequences.size == 0 or labels.size == 0:
-    print("错误: 未能成功加载任何数据，请检查数据文件和路径.")
-    exit()
-
-print(f"加载数据完成，序列数量: {len(sequences)}, 标签数量: {len(labels)}")
-print(f"序列数据形状: {sequences.shape}, 标签数据形状: {labels.shape}")
-
-# 划分数据集 (保持不变)
-train_sequences, test_sequences, train_labels, test_labels = train_test_split(
-    sequences, labels, test_size=0.2, random_state=42, stratify=labels)
-
-print(f"训练集序列形状: {train_sequences.shape}, 训练集标签形状: {train_labels.shape}")
-print(f"测试集序列形状: {test_sequences.shape}, 测试集标签形状: {test_labels.shape}")
-
-# 创建 PyTorch Dataset
+# 创建数据集和数据加载器
 train_dataset = ProfileDataset(train_sequences, train_labels)
+val_dataset = ProfileDataset(val_sequences, val_labels)
 test_dataset = ProfileDataset(test_sequences, test_labels)
 
-# 创建 PyTorch DataLoader
 batch_size = 32
 train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
+val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
 test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
-
 
 # 2. 构建 TSMixer 模型 (PyTorch 版本)
 class TSMixerModel(nn.Module):
@@ -214,7 +247,6 @@ class TSMixerModel(nn.Module):
         x = x.squeeze(dim=-1) # 移除最后一个维度，变为 (batch_size, num_features)
         x = self.fc_output(x) # -> (batch_size, 1)
         return torch.sigmoid(x) # 输出 sigmoid 概率
-
 
 # 初始化模型
 num_features = 492
@@ -264,7 +296,7 @@ for epoch in range(epochs):
     val_total_predictions = 0  # 记录验证集总预测数量
 
     with torch.no_grad():
-        for sequences_batch, labels_batch in test_loader:
+        for sequences_batch, labels_batch in val_loader:
             sequences_batch, labels_batch = sequences_batch.to(device), labels_batch.to(device)
             outputs = model(sequences_batch)
             loss = criterion(outputs, labels_batch.unsqueeze(1))
@@ -275,7 +307,7 @@ for epoch in range(epochs):
             val_correct_predictions += (predicted_labels_batch == labels_batch.int()).sum().item()  # 统计正确预测
             val_total_predictions += labels_batch.size(0)  # 更新总预测数量
 
-    avg_val_loss = val_loss / len(test_loader)
+    avg_val_loss = val_loss / len(val_loader)
     val_accuracy = val_correct_predictions / val_total_predictions  # 计算验证准确率
     print(f"验证集损失: {avg_val_loss:.4f}, 验证准确率: {val_accuracy:.4f}")
 
@@ -313,6 +345,6 @@ print("\n分类报告:")
 print(classification_report(all_true_labels, all_predicted_labels))
 
 # (可选) 打印部分预测结果 (前 10 个)
-print("\n部分预测结果 (前 10 个):")
-for i in range(min(10, len(all_true_labels))):
-    print(f"预测概率: {outputs[i][0]:.4f}, 预测标签: {all_predicted_labels[i]}, 真实标签: {all_true_labels[i]}") # 注意: 这里需要修改为 PyTorch 的预测概率获取方式 (如果需要打印概率)
+# print("\n部分预测结果 (前 10 个):")
+# for i in range(min(10, len(all_true_labels))):
+#     print(f"预测概率: {outputs[i][0]:.4f}, 预测标签: {all_predicted_labels[i]}, 真实标签: {all_true_labels[i]}") # 注意: 这里需要修改为 PyTorch 的预测概率获取方式 (如果需要打印概率)
