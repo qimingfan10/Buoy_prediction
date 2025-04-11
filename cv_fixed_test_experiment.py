@@ -90,7 +90,7 @@ def load_and_process_data_in_chunks(folder_path, n, chunk_size=100):
             file_path = os.path.join(folder_path, file)
             try:
                 df = pd.read_csv(file_path)
-                feature_vector = extract_profile_features(df)
+                feature_vector = extract_modified_profile_features(df)
                 if feature_vector is not None:
                     label = get_label_without_print(file)
                     features_dict[file] = (feature_vector, label)
@@ -101,6 +101,45 @@ def load_and_process_data_in_chunks(folder_path, n, chunk_size=100):
         
     return features_dict
 
+# 新增函数：修改后的特征提取函数
+def extract_modified_profile_features(df):
+    """
+    提取修改后的特征向量：1经度，1纬度，191盐度（从第5行到第195行），191温度（从第5行到195行）
+    """
+    try:
+        # 提取经纬度（第一行）
+        longitude = df.iloc[0, 0]
+        latitude = df.iloc[0, 1]
+        
+        # 提取盐度和温度（第5-195行）
+        salinity = df.iloc[4:195, 2].values
+        temperature = df.iloc[4:195, 3].values
+        
+        # 检查数据长度
+        if len(salinity) != 191 or len(temperature) != 191:
+            print(f"警告：数据长度不正确 - 盐度：{len(salinity)}, 温度：{len(temperature)}")
+            return None
+        
+        # 检查是否有NaN值
+        if (np.isnan(longitude) or np.isnan(latitude) or 
+            np.isnan(salinity).any() or np.isnan(temperature).any()):
+            return None
+        
+        # 组合特征
+        feature_vector = np.concatenate([[longitude, latitude], salinity, temperature])
+        
+        # 验证特征向量长度
+        expected_length = 2 + 191 + 191  # 经度纬度 + 盐度 + 温度
+        if len(feature_vector) != expected_length:
+            print(f"警告：特征向量长度不正确 - 预期：{expected_length}，实际：{len(feature_vector)}")
+            return None
+            
+        return feature_vector
+        
+    except Exception as e:
+        print(f"特征提取错误: {str(e)}")
+        return None
+
 # 准备序列数据
 def prepare_sequences_fast(n_limit, sequence_length, all_filenames, features_dict):
     start_time = time.time()
@@ -108,12 +147,26 @@ def prepare_sequences_fast(n_limit, sequence_length, all_filenames, features_dic
     filenames = all_filenames[:n_limit] if n_limit < len(all_filenames) else all_filenames
     sequences = []
     labels = []
-    filenames_used = []  # 记录使用的文件名，用于后续分析
+    filenames_used = []
     
     group_size = sequence_length
     num_groups = len(filenames) // group_size
     
     print(f"准备序列数据 (n={n_limit}, sequence_length={sequence_length})...")
+    
+    # 首先验证特征向量维度
+    first_feature = None
+    for filename in features_dict:
+        feature_vector, _ = features_dict[filename]
+        if first_feature is None:
+            first_feature = feature_vector
+            feature_dim = len(feature_vector)
+            print(f"特征向量维度: {feature_dim}")
+        else:
+            if len(feature_vector) != feature_dim:
+                print(f"警告：特征向量维度不一致 - 预期：{feature_dim}，实际：{len(feature_vector)}")
+                return None, None, None, None, None
+    
     for group_idx in tqdm(range(num_groups), desc="序列生成进度"):
         start_idx = group_idx * group_size
         end_idx = start_idx + group_size
@@ -126,6 +179,9 @@ def prepare_sequences_fast(n_limit, sequence_length, all_filenames, features_dic
         for filename in group_filenames:
             if filename in features_dict:
                 feature_vector, label = features_dict[filename]
+                if len(feature_vector) != feature_dim:
+                    valid_sequence = False
+                    break
                 sequence_features.append(feature_vector)
                 current_labels.append(label)
             else:
@@ -134,29 +190,76 @@ def prepare_sequences_fast(n_limit, sequence_length, all_filenames, features_dic
         
         if valid_sequence and len(sequence_features) == sequence_length:
             if len(set(current_labels)) == 1:  # 确保序列标签一致
-                sequences.append(sequence_features)
+                sequences.append(np.array(sequence_features))  # 确保每个序列都是numpy数组
                 labels.append(current_labels[0])
-                filenames_used.append(group_filenames)  # 记录用于构建这个序列的文件名
+                filenames_used.append(group_filenames)
+    
+    if not sequences:
+        print("警告：没有有效的序列生成")
+        return None, None, None, None, None
+    
+    # 转换为numpy数组前再次验证维度
+    sequences_array = np.array(sequences)
+    print(f"序列数组形状: {sequences_array.shape}")
     
     prep_time = time.time() - start_time
-    # 分析类别分布
     class_distribution = "正样本比例: {:.2f}% ({}/{})".format(
         100 * np.mean(labels), sum(labels), len(labels))
     print(f"类别分布: {class_distribution}")
     
-    return np.array(sequences), np.array(labels), filenames_used, prep_time, class_distribution
+    return sequences_array, np.array(labels), filenames_used, prep_time, class_distribution
 
-# 安全的数据集划分
+# 修改 safe_train_test_split 函数
 def safe_train_test_split(*arrays, **kwargs):
     try:
-        return train_test_split(*arrays, **kwargs)
-    except ValueError as e:
-        if "The least populated class in y has only 1 member" in str(e):
-            print("警告：样本量太少，取消分层抽样...")
-            kwargs.pop('stratify', None)
-            return train_test_split(*arrays, **kwargs)
+        # 获取标签数组的索引（通常是第二个参数）
+        label_idx = 1
+        labels = arrays[label_idx]
+        
+        # 检查是否有足够的正样本和负样本
+        positive_indices = np.where(labels == 1)[0]
+        negative_indices = np.where(labels == 0)[0]
+        
+        if len(positive_indices) == 0 or len(negative_indices) == 0:
+            print("错误：数据集中缺少正样本或负样本")
+            return None
+        
+        # 计算测试集中需要的样本数量
+        test_size = kwargs.get('test_size', 0.2)
+        if isinstance(test_size, float):
+            n_test = int(len(labels) * test_size)
         else:
-            raise e
+            n_test = test_size
+            
+        # 确保测试集至少包含一个正样本和一个负样本
+        min_samples_per_class = max(1, n_test // 4)  # 每个类别至少占25%
+        
+        if len(positive_indices) < min_samples_per_class or len(negative_indices) < min_samples_per_class:
+            print("警告：某个类别的样本数量过少，无法保证测试集的类别平衡")
+            return train_test_split(*arrays, **kwargs)
+        
+        # 分别从正样本和负样本中抽取测试集
+        test_pos_indices = np.random.choice(positive_indices, min_samples_per_class, replace=False)
+        test_neg_indices = np.random.choice(negative_indices, min_samples_per_class, replace=False)
+        
+        # 合并测试集索引
+        test_indices = np.concatenate([test_pos_indices, test_neg_indices])
+        np.random.shuffle(test_indices)
+        
+        # 剩余样本作为训练集
+        train_indices = np.array([i for i in range(len(labels)) if i not in test_indices])
+        
+        # 根据索引分割所有数组
+        result = []
+        for array in arrays:
+            result.extend([array[train_indices], array[test_indices]])
+            
+        return tuple(result)
+        
+    except Exception as e:
+        print(f"警告：测试集划分出现异常 - {str(e)}")
+        print("尝试使用常规划分方法...")
+        return train_test_split(*arrays, **kwargs)
 
 # 初始化模型权重
 def init_weights(m):
@@ -190,22 +293,35 @@ for n in n_values:
         sequences, labels, filenames_used, data_prep_time, class_distribution = prepare_sequences_fast(
             n, seq_length, all_filenames, features_dict)
         
-        if sequences.size == 0 or labels.size == 0:
+        if sequences is None or labels is None:
             print(f"错误: 未能准备任何数据，跳过此组合")
             continue
             
         print(f"数据准备完成，用时: {data_prep_time:.2f}秒")
-        print(f"序列数量: {len(sequences)}, 标签数量: {len(labels)}")
-        print(f"序列数据形状: {sequences.shape}, 标签数据形状: {labels.shape}")
+        print(f"序列数量: {sequences.shape}, 标签数量: {labels.shape}")
         
         # 首先划分出固定的测试集（20%）
         try:
-            train_val_sequences, test_sequences, train_val_labels, test_labels, train_val_filenames, test_filenames = safe_train_test_split(
+            split_result = safe_train_test_split(
                 sequences, labels, filenames_used, 
                 test_size=0.2, 
-                random_state=42, 
-                stratify=labels
+                random_state=42
             )
+            
+            if split_result is None:
+                print(f"错误：无法创建包含正负样本的测试集，跳过此组合")
+                continue
+            
+            train_val_sequences, test_sequences, train_val_labels, test_labels, train_val_filenames, test_filenames = split_result
+            
+            # 检查测试集的类别分布
+            test_pos_ratio = np.mean(test_labels)
+            print(f"测试集正样本比例: {test_pos_ratio:.2%} ({sum(test_labels)}/{len(test_labels)})")
+            
+            if test_pos_ratio == 0 or test_pos_ratio == 1:
+                print("错误：测试集中只包含一个类别的样本，跳过此组合")
+                continue
+            
         except Exception as e:
             print(f"错误: 测试集划分失败 - {str(e)}")
             continue
@@ -283,24 +399,27 @@ for n in n_values:
                     
                     optimizer.zero_grad()
                     outputs = model(sequences_batch)
-                    loss = criterion(outputs, labels_batch.unsqueeze(1))
                     
-                    # L1正则化
-                    l1_lambda = 0.01
+                    # 计算BCE损失
+                    bce_loss = criterion(outputs, labels_batch.unsqueeze(1))
+                    
+                    # 添加L1正则化，但使用更小的权重
+                    l1_lambda = 0.0001  # 降低L1正则化权重
                     l1_norm = sum(p.abs().sum() for p in model.parameters())
-                    loss = loss + l1_lambda * l1_norm
+                    total_loss = bce_loss + l1_lambda * l1_norm
                     
-                    loss.backward()
+                    total_loss.backward()
                     torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                     optimizer.step()
                     
-                    train_loss += loss.item()
+                    # 记录BCE损失而不是总损失
+                    train_loss += bce_loss.item()
                     predicted = (outputs > 0.5).int().flatten()
                     train_correct += (predicted == labels_batch.int()).sum().item()
                     train_total += labels_batch.size(0)
                 
                 train_accuracy = train_correct / train_total
-                avg_train_loss = train_loss / len(train_loader)
+                avg_train_loss = train_loss / len(train_loader)  # 使用BCE损失计算平均值
                 
                 # 验证阶段
                 model.eval()
