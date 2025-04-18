@@ -70,7 +70,7 @@ python predict_quantized.py
 
 **Note:**
 
-  * You will need to use ONNX Runtime or another ONNX-compatible inference engine to load and run `model_quantized.onnx`.
+  * You will need to use ONNX Runtime or other ONNX-compatible inference engine to load and run `model_quantized.onnx`。
 
 ## File Explanation
 
@@ -78,7 +78,7 @@ python predict_quantized.py
   * `BEST_MODEL_seq16_fold2_testacc0.8462.pth`: The trained PyTorch model weights file.
   * `requirement.txt`: Lists the Python libraries and their versions required to run the project.
   * `cv_fixed_test_experiment.py`: Pretraining file, using five-fold cross-validation.
-  * `model_quantized/`: Directory containing the ONNX quantized model and related files.
+  * `model_quantized/`: Directory containing the ONNX quantized model and related files。
   * `model_quantized/model_quantized.onnx`: The ONNX model file after quantization, typically smaller in size and potentially faster for inference.
   * `model_quantized/predict_quantized.py`: The script used to load and run the quantized ONNX model for prediction.
 
