@@ -20,8 +20,8 @@
 
 1.  克隆本仓库到本地：
     ```bash
-    git clone <https://github.com/qimingfan10/Buoy_prediction.git>
-    cd <Buoy_prediction>
+    git clone https://github.com/qimingfan10/Buoy_prediction.git
+    cd Buoy_prediction
     ```
 2.  安装所需的依赖库。请确保你已经安装了 Python。
     ```bash
