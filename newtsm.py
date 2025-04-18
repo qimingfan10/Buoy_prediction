@@ -72,7 +72,7 @@ def extract_profile_features(df_profile):
         temperature = np.pad(temperature, (0, 245 - len(temperature)), 'constant', constant_values=0)
     if len(salinity) < 245:
         salinity = np.pad(salinity, (0, 245 - len(salinity)), 'constant', constant_values=0)
-    feature_vector = np.concatenate(([lon], [lat], temperature, salinity))
+    feature_vector = np.concatenate(([lon], [lat], salinity, temperatur))
     if np.count_nonzero(feature_vector == 0) > 256:
         return None
     return feature_vector
