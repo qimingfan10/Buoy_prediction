@@ -160,15 +160,3 @@ python predict_quantized.py
   * `model_quantized/predict_quantized.py`: The script used to load and run the quantized ONNX model for prediction.
 
 -----
-
-```
-
-**说明:**
-
-1.  在文件的最顶部添加了 `[中文](#中文) | [English](#english)`，这是语言切换链接。
-2.  在中文标题 `# 浮标预测` 前面添加了 `<a name="中文"></a>` 锚点。
-3.  在英文标题 `# Buoy Prediction` 前面添加了 `<a name="english"></a>` 锚点。
-4.  点击顶部的链接时，页面会跳转到对应的锚点位置。
-5.  默认情况下，页面的顶部会显示中文内容，因为中文部分在前面。
-6.  添加了 `cv_fixed_test_experiment.py` 到仓库结构和文件说明中。
-7.  明确了 `model_quantized` 文件夹中的 `predict_quantized.py` 是用于 ONNX 预测的脚本。
