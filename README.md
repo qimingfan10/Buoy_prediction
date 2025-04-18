@@ -1,11 +1,10 @@
 # 浮标预测 / Buoy Prediction
 
-[中文](#中文) | [English](#english)
+[中文](#chinese) | [English](#english)
 
 ---
 
-<a name="中文"></a>
-# 浮标预测
+<a name="chinese"></a> # 浮标预测 {#chinese}
 
 这是一个包含模型预测相关代码和文件的仓库，提供了PyTorch和ONNX两种格式的模型预测示例。
 
@@ -83,9 +82,7 @@ python predict_quantized.py
 
 -----
 
-\<a name="english"\>\</a\>
-
-# Buoy Prediction
+\<a name="english"\>\</a\> \# Buoy Prediction {\#english}
 
 This is a repository containing code and files related to model prediction, providing examples for both PyTorch and ONNX model formats.
 
