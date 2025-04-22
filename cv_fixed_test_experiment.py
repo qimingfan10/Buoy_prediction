@@ -101,15 +101,22 @@ def load_and_process_data_in_chunks(folder_path, n, chunk_size=100):
         
     return features_dict
 
-# 新增函数：修改后的特征提取函数
+from sklearn.preprocessing import MinMaxScaler
+
 def extract_modified_profile_features(df):
     """
     提取修改后的特征向量：1经度，1纬度，191盐度（从第5行到第195行），191温度（从第5行到195行）
+    归一化经纬度
     """
     try:
         # 提取经纬度（第一行）
         longitude = df.iloc[0, 0]
         latitude = df.iloc[0, 1]
+        
+        # 对经纬度进行归一化 (Min-Max)
+        scaler = MinMaxScaler(feature_range=(0, 1))
+        normalized_coords = scaler.fit_transform([[longitude, latitude]])[0]
+        longitude, latitude = normalized_coords[0], normalized_coords[1]
         
         # 提取盐度和温度（第5-195行）
         salinity = df.iloc[4:195, 2].values
@@ -139,6 +146,7 @@ def extract_modified_profile_features(df):
     except Exception as e:
         print(f"特征提取错误: {str(e)}")
         return None
+
 
 # 准备序列数据
 def prepare_sequences_fast(n_limit, sequence_length, all_filenames, features_dict):
